@@ -1,0 +1,5 @@
+# ignore the test cases folder
+cases/
+
+# ignore translate.c executable
+translate
