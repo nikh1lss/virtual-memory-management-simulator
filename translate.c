@@ -277,6 +277,7 @@ void task3(char* filename) {
             } else {
 
                 // There are free frames remaining (nextFreeFrame < NUM_FRAMES)
+                pageTable[pageNumber].present = 1;
                 pageTable[pageNumber].frameNumber = nextFreeFrame;
                 frameTable[nextFreeFrame].present = 1;
                 frameTable[nextFreeFrame].pageNumber = pageNumber;
