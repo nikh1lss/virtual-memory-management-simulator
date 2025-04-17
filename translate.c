@@ -208,7 +208,7 @@ void task2(char* filename) {
             frameTable[nextFreeFrame].present = 1;
             frameTable[nextFreeFrame].pageNumber = pageNumber;
 
-            while (nextFreeFrame < NUM_PAGES && frameTable[nextFreeFrame].present) {
+            while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
                 ++nextFreeFrame;
             }
         }
@@ -290,7 +290,7 @@ void task3(char* filename) {
                 frameTable[nextFreeFrame].present = 1;
                 frameTable[nextFreeFrame].pageNumber = pageNumber;
 
-                while (nextFreeFrame < NUM_PAGES && frameTable[nextFreeFrame].present) {
+                while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
                     ++nextFreeFrame;
                 }
             }
@@ -493,7 +493,7 @@ void task4(char* filename) {
                     frameTable[nextFreeFrame].present = 1;
                     frameTable[nextFreeFrame].pageNumber = pageNumber;
 
-                    while (nextFreeFrame < NUM_PAGES && frameTable[nextFreeFrame].present) {
+                    while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
                         ++nextFreeFrame;
                     }
                 }
