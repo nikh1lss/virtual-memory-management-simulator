@@ -41,6 +41,16 @@ typedef struct {
     unsigned int lastUsed;
 } tlbEntry_t;
 
+/* System structure to simulate an OS holding all memory tables and counters */
+typedef struct {
+    pageTableEntry_t pageTable[NUM_PAGES];
+    frameTableEntry_t frameTable[NUM_FRAMES];
+    tlbEntry_t tlb[TLB_SIZE];
+    unsigned int nextFreeFrame;
+    unsigned int oldestFrame;
+    unsigned int accessCount;
+} systemState_t;
+
 
 /* Function prototypes */
 void parseLogicalAddress(unsigned int logicalAddress, unsigned int* pageNumber, unsigned int* offset);
@@ -49,10 +59,12 @@ int searchTLB(tlbEntry_t* tlb, unsigned int pageNumber);
 void updateTLB(tlbEntry_t* tlb, unsigned int pageNumber, unsigned int frameNumber, unsigned int accessCount);
 void flushTLBEntry(tlbEntry_t* tlb, unsigned int pageNumber);
 unsigned int countTLBEntries(tlbEntry_t* tlb);
-void task1(char* filename);
-void task2(char* filename);
-void task3(char* filename);
-void task4(char* filename);
+FILE* openInputFile(char* filename);
+void initializeSystem(systemState_t* system);
+void handlePageFault(systemState_t* system, unsigned int pageNumber);
+void processAddress(FILE* file, systemState_t* system, int taskLevel);
+void runSimulation(char* filename, char* task);
+
 
 int main(int argc, char *argv[]) {
     char* filename = NULL;
@@ -85,18 +97,166 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // run specific task given as argument 
-    if (strcmp(task, "task1") == 0) {
-        task1(filename);
-    } else if (strcmp(task, "task2") == 0) {
-        task2(filename);
-    } else if (strcmp(task, "task3") == 0) {
-        task3(filename);
-    } else if (strcmp(task, "task4") == 0) {
-        task4(filename);
+    runSimulation(filename, task);
+
+    return 0; 
+}
+
+
+/**
+ * Creates system and processes specific task
+ * 
+ * @param filename The input file containing logical addresses
+ * @param taskLevel Which task to process
+ */
+void runSimulation(char* filename, char* task) {
+    FILE* file = openInputFile(filename);
+    systemState_t system;
+    initializeSystem(&system);
+
+    processAddress(file, &system, task[4] - '0');
+
+    fclose(file);
+}
+
+/**
+ * Opens the input file for processing
+ * 
+ * @param filename The input file containing logical addresses
+ * @return File pointer to the opened file
+ */
+FILE* openInputFile(char* filename) {
+    FILE* file = fopen(filename, "r");
+
+    if (!file) {
+        fprintf(stderr, "Error opening file: %s\n", filename);
+        exit(EXIT_FAILURE);
     }
 
-    return 0;
+    return file;
+}
+
+
+/** 
+ * Initializes the state of the system/OS
+ * 
+ * @param system Pointer to a system struct that we are simulating into
+ */
+void initializeSystem(systemState_t* system) {
+    // Initilize entries in struct to 0
+    memset(system->pageTable, 0, sizeof(system->pageTable));
+    memset(system->frameTable, 0, sizeof(system->frameTable));
+    memset(system->tlb, 0, sizeof(system->tlb));
+
+    system->accessCount = 0;
+    system->nextFreeFrame = 0;
+    system->oldestFrame = 0;
+}
+
+/**
+ * Handles a page fault by either allocating a free frame or evicting a page,
+ * Also handles the the case if a TLB is in use (Task 4)
+ * 
+ * @param system Pointer to the system state
+ * @param pageNumber The page number that caused the fault
+ */
+void handlePageFault(systemState_t* system, unsigned int pageNumber) {
+    // Check if there are any free frames remaining
+    if (system->nextFreeFrame == NUM_FRAMES) {
+        // There are no free frames, need to evict with FIFO
+        unsigned int evictedPage = system->frameTable[system->oldestFrame].pageNumber;
+
+        // Evict the page
+        system->pageTable[evictedPage].present = 0;
+
+        // Allocate the new page to oldest frame
+        system->pageTable[pageNumber].present = 1;
+        system->pageTable[pageNumber].frameNumber = system->oldestFrame;
+        system->frameTable[system->oldestFrame].pageNumber = pageNumber;
+
+        printf("evicted-page=%u,freed-frame=%u\n", evictedPage, system->oldestFrame);
+
+        // increment or wrap oldestFrame back to 0 after it reaches end of frame count
+        system->oldestFrame = (system->oldestFrame + 1) % NUM_FRAMES;
+
+        // Check if a TLB is in use and if evicted page is present for flushing
+        if (system->tlb[0].lastUsed > 0) {
+            flushTLBEntry(system->tlb, evictedPage);
+        }
+
+    } else {
+        // There are free frames remaining (nextFreeFrame < NUM_FRAMES)
+        system->pageTable[pageNumber].frameNumber = system->nextFreeFrame;
+        system->pageTable[pageNumber].present = 1;
+        system->frameTable[system->nextFreeFrame].pageNumber = pageNumber;
+        system->frameTable[system->nextFreeFrame].present = 1;
+
+        // Find next free frame
+        while (system->nextFreeFrame < NUM_FRAMES && system->frameTable[system->nextFreeFrame].present) {
+            ++system->nextFreeFrame;
+        }
+    }
+}
+
+
+/**
+ * Processes a single logical address based on task level
+ * 
+ * @param file The input file
+ * @param system Pointer to the system state
+ * @param taskLevel The task level (1-4)
+ */
+void processAddress(FILE* file, systemState_t* system, int taskLevel) {
+    unsigned int logicalAddress, pageNumber, offset;
+
+    // Process each logical address in the file
+    while (fscanf(file, "%u", &logicalAddress) != EOF) {
+        ++system->accessCount;
+        parseLogicalAddress(logicalAddress, &pageNumber, &offset);
+
+        // Print Task 1 output for all tasks
+        printf("logical-address=%u,page-number=%u,offset=%u\n", logicalAddress, pageNumber, offset);
+
+        // TLB handling for task 4
+        if (taskLevel == 4) {
+            int tlbIndex = searchTLB(system->tlb, pageNumber);
+            unsigned int tlbHit = (tlbIndex != -1);
+
+            if (tlbHit) {
+                unsigned int frameNumber = system->tlb[tlbIndex].frameNumber;
+                unsigned int physicalAddress = calculatePhysicalAddress(frameNumber, offset);
+                system->tlb[tlbIndex].lastUsed = system->accessCount;
+
+                printf("tlb-hit=%u,page-number=%u,frame=%u,physical-address=%u\n", 
+                    tlbHit, pageNumber, frameNumber, physicalAddress);
+
+            } else {
+                // TLB miss
+                printf("tlb-hit=%u,page-number=%u,frame=none,physical-address=none\n", 
+                    tlbHit, pageNumber);
+            }
+        }
+
+        // Page fault handling for tasks 2-4
+        if (taskLevel >= 2) {
+            unsigned int pageFault = !system->pageTable[pageNumber].present;
+
+            if (pageFault) {
+                handlePageFault(system, pageNumber);
+            }
+
+            // Update TLB for task 4
+            if (taskLevel == 4) {
+                updateTLB(system->tlb, pageNumber, system->pageTable[pageNumber].frameNumber, system->accessCount);
+            }
+
+            unsigned int physicalAddress =  calculatePhysicalAddress(system->pageTable[pageNumber].frameNumber, offset);
+
+            // Print task2+ output
+            printf("page-number=%u,page-fault=%u,frame-number=%u,physical-address=%u\n", 
+                pageNumber, pageFault, system->pageTable[pageNumber].frameNumber, physicalAddress);
+        }
+    }
 }
 
 
@@ -122,38 +282,6 @@ void parseLogicalAddress(unsigned int logicalAddress, unsigned int* pageNumber, 
 
 
 /**
- * Executes Task 1: Parse logical addresses and print page number and offset
- * in required format: logical-address=<laddress>,page-number=<pnumber>,offset=<poffset>
- * 
- * @param filename The input file containing logical addresses
- */
-void task1(char* filename) {
-    unsigned int logicalAddress, pageNumber, offset;
-
-    // Open filename for reading 
-    FILE* file = fopen(filename, "r");
-
-    if (!file) {
-        fprintf(stderr, "Error opening file\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Process each logical address in file 
-    while (fscanf(file, "%u", &logicalAddress) != EOF) {
-
-        parseLogicalAddress(logicalAddress, &pageNumber, &offset);
-
-        // print result in required format 
-        printf("logical-address=%u,page-number=%u,offset=%u\n", logicalAddress, pageNumber, offset); 
-    }
-
-    fclose(file);
-
-    return;
-}
-
-
-/**
  * Calculates the physical address based on frame number and offset.
  * 
  * @param frameNumber The frame number
@@ -162,150 +290,6 @@ void task1(char* filename) {
  */
 unsigned int calculatePhysicalAddress(unsigned int frameNumber, unsigned int offset) {
     return (frameNumber * FRAME_SIZE) + offset;
-}
-
-
-/**
- * Executes Task 2: Translate logical addresses to physical addresses using a page table
- * in required format: 
- * page-number=<pnumber>,page-fault=<pfault>,frame-number=<fnumber>,physical-address=<paddress>
- * 
- * @param filename The input file containing logical addresses
- */
-void task2(char* filename) {
-    unsigned int logicalAddress, pageNumber, offset;
-    unsigned int nextFreeFrame = 0;
-
-    // open file for reading 
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        fprintf(stderr, "Error opening file\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize page table (all entries are not present therefore initialize all entries in struct to 0) 
-    pageTableEntry_t pageTable[NUM_PAGES] = {0}; 
-
-    // Initialize free frame list to 0 (All frames are initially free and page number does not matter) 
-    frameTableEntry_t frameTable[NUM_FRAMES] = {0};
-
-    // process each logical address in the file
-    while (fscanf(file, "%u", &logicalAddress) != EOF) {
-        parseLogicalAddress(logicalAddress, &pageNumber, &offset);
-
-        // print task 1 output
-        printf("logical-address=%u,page-number=%u,offset=%u\n", logicalAddress, pageNumber, offset); 
-
-        // check if page is already allocated to a physical frame 
-        unsigned int pageFault = !pageTable[pageNumber].present;
-
-        if (pageFault) {
-            // allocate the page to the next lowest free frame 
-            pageTable[pageNumber].present = 1;
-            pageTable[pageNumber].frameNumber = nextFreeFrame;
-
-            // Mark the frame as used 
-            frameTable[nextFreeFrame].present = 1;
-            frameTable[nextFreeFrame].pageNumber = pageNumber;
-
-            while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
-                ++nextFreeFrame;
-            }
-        }
-
-        unsigned int physicalAddress = calculatePhysicalAddress(pageTable[pageNumber].frameNumber, offset);
-
-        printf("page-number=%u,page-fault=%u,frame-number=%u,physical-address=%u\n", 
-            pageNumber, pageFault, pageTable[pageNumber].frameNumber, physicalAddress);
-    }
-
-    fclose(file);
-
-    return;
-}
-
-
-/** 
- * Executes Task 3: Page Replacement Algorithm (FIFO) 
- * in required format: 
- * evicted-page=<epage>,freed-frame=<fframe>
- *
- * @param filename The input file containing logical addresses 
- */
-void task3(char* filename) {
-    unsigned int logicalAddress, pageNumber, offset;
-    unsigned int nextFreeFrame = 0;
-    unsigned int oldestFrame = 0;
-
-    // open file for reading
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        fprintf(stderr, "Error opening file\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize page table (all entries are not present therefore initialize all entries in struct to 0) 
-    pageTableEntry_t pageTable[NUM_PAGES] = {0}; 
-
-    // Initialize free frame list to 0 (All frames are initially free and page number does not matter) 
-    frameTableEntry_t frameTable[NUM_FRAMES] = {0};
-
-    // process each logical address in the file
-    while (fscanf(file, "%u", &logicalAddress) != EOF) {
-        parseLogicalAddress(logicalAddress, &pageNumber, &offset);
-
-        // print task 1 output
-        printf("logical-address=%u,page-number=%u,offset=%u\n", logicalAddress, pageNumber, offset);
-
-        // check if page is already allocated to a physical frame 
-        unsigned int pageFault = !pageTable[pageNumber].present;
-
-        if (pageFault) {
-
-            // check if there are any free frames remaining to allocate this page to
-            if (nextFreeFrame == NUM_FRAMES) {
-
-                // There are no free frames remaining
-                unsigned int evictedPage = frameTable[oldestFrame].pageNumber;
-
-                // evict the page
-                pageTable[evictedPage].present = 0;
-
-                // allocate new page
-                pageTable[pageNumber].present = 1;
-                pageTable[pageNumber].frameNumber = oldestFrame;
-                frameTable[oldestFrame].pageNumber = pageNumber;
-
-                /* print task3 output */
-                printf("evicted-page=%u,freed-frame=%u\n", evictedPage, oldestFrame);
-
-                // increment or wrap oldestFrame back to 0 after it reaches end of frame count
-                oldestFrame = (oldestFrame + 1) % NUM_FRAMES;
-
-            } else {
-
-                // There are free frames remaining (nextFreeFrame < NUM_FRAMES)
-                pageTable[pageNumber].present = 1;
-                pageTable[pageNumber].frameNumber = nextFreeFrame;
-                frameTable[nextFreeFrame].present = 1;
-                frameTable[nextFreeFrame].pageNumber = pageNumber;
-
-                while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
-                    ++nextFreeFrame;
-                }
-            }
-        }
-
-        unsigned int physicalAddress = calculatePhysicalAddress(pageTable[pageNumber].frameNumber, offset);
-
-       /* print task 2 output in required format */
-       printf("page-number=%u,page-fault=%u,frame-number=%u,physical-address=%u\n", 
-        pageNumber, pageFault, pageTable[pageNumber].frameNumber, physicalAddress);
-    }
-
-    fclose(file);
-
-    return;
 }
 
 
@@ -405,114 +389,3 @@ void updateTLB(tlbEntry_t* tlb, unsigned int pageNumber, unsigned int frameNumbe
 
     return;
 }
-
-
-/**
- * Executes Task 4: TLB Implementation
- * 
- * @param filename The input file containing logical addresses
- */
-void task4(char* filename) {
-    unsigned int logicalAddress, pageNumber, offset;
-    unsigned int nextFreeFrame = 0;
-    unsigned int oldestFrame = 0;
-    unsigned int accessCount = 0;
-
-    // open file for reading
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        fprintf(stderr, "Error opening file\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize page table (all entries are not present therefore initialize all entries in struct to 0) 
-    pageTableEntry_t pageTable[NUM_PAGES] = {0}; 
-
-    // Initialize free frame list to 0 (All frames are initially free and page number does not matter) 
-    frameTableEntry_t frameTable[NUM_FRAMES] = {0};
-
-    // Initialize TLB to 0
-    tlbEntry_t tlb[TLB_SIZE] = {0};
-
-    // Process each logical address in the file
-    while (fscanf(file, "%u", &logicalAddress) != EOF) {
-        ++accessCount;
-        parseLogicalAddress(logicalAddress, &pageNumber, &offset);
- 
-        printf("logical-address=%u,page-number=%u,offset=%u\n", logicalAddress, pageNumber, offset);
-
-        // Check the TLB for page number mapping first
-        int tlbIndex = searchTLB(tlb, pageNumber);
-        unsigned int tlbHit = (tlbIndex != -1);
-
-        if (tlbHit) {
-            // Page number found in TLB
-            unsigned int physicalAddress = calculatePhysicalAddress(tlb[tlbIndex].frameNumber, offset);
-            tlb[tlbIndex].lastUsed = accessCount;
-
-            // Print output for tlb hit
-            printf("tlb-hit=%u,page-number=%u,frame=%u,physical-address=%u\n", 
-                tlbHit, pageNumber, tlb[tlbIndex].frameNumber, physicalAddress);
-
-        } else {
-            // TLB miss
-            printf("tlb-hit=%u,page-number=%u,frame=none,physical-address=none\n", 
-                tlbHit, pageNumber);
-
-            // Check if page is already allocated to a physical frame
-            unsigned int pageFault = !pageTable[pageNumber].present;
-
-            if (pageFault) {
-                // Page is not in memory
-
-                if (nextFreeFrame == NUM_FRAMES) {
-                    // There are no free frames remaining
-                    unsigned int evictedPage = frameTable[oldestFrame].pageNumber;
-
-                    // Evict the page
-                    pageTable[evictedPage].present = 0;
-
-                    // Allocate a new page
-                    pageTable[pageNumber].present = 1;
-                    pageTable[pageNumber].frameNumber = oldestFrame;
-                    frameTable[oldestFrame].pageNumber = pageNumber;
-
-                    printf("evicted-page=%u,freed-frame=%u\n", evictedPage, oldestFrame);
-
-                    // increment or wrap oldestFrame back to 0 after it reaches end of frame count
-                    oldestFrame = (oldestFrame + 1) % NUM_FRAMES;
-
-
-                    // If evicted page is present in TLB, flush it
-                    flushTLBEntry(tlb, evictedPage);
-
-                } else {
-                    // There are free frames remaining (nextFreeFrame < NUM_FRAMES)
-                    pageTable[pageNumber].present = 1;
-                    pageTable[pageNumber].frameNumber = nextFreeFrame;
-                    frameTable[nextFreeFrame].present = 1;
-                    frameTable[nextFreeFrame].pageNumber = pageNumber;
-
-                    while (nextFreeFrame < NUM_FRAMES && frameTable[nextFreeFrame].present) {
-                        ++nextFreeFrame;
-                    }
-                }
-            }
-
-            // Add the new mapping to the TLB
-            updateTLB(tlb, pageNumber, pageTable[pageNumber].frameNumber, accessCount);
-
-            unsigned int physicalAddress = calculatePhysicalAddress(pageTable[pageNumber].frameNumber, offset);
-
-            /* print task 2 output in required format */
-            printf("page-number=%u,page-fault=%u,frame-number=%u,physical-address=%u\n", 
-                pageNumber, pageFault, pageTable[pageNumber].frameNumber, physicalAddress);
-
-        }
-    }
-
-    fclose(file);
-
-    return;
-}
-
