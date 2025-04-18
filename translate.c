@@ -61,7 +61,7 @@ void flushTLBEntry(tlbEntry_t* tlb, unsigned int pageNumber);
 unsigned int countTLBEntries(tlbEntry_t* tlb);
 FILE* openInputFile(char* filename);
 void initializeSystem(systemState_t* system);
-void handlePageFault(systemState_t* system, unsigned int pageNumber);
+void handlePageFault(systemState_t* system, unsigned int pageNumber, int taskLevel);
 void processAddress(FILE* file, systemState_t* system, int taskLevel);
 void runSimulation(char* filename, char* task);
 
@@ -160,7 +160,7 @@ void initializeSystem(systemState_t* system) {
  * @param system Pointer to the system state
  * @param pageNumber The page number that caused the fault
  */
-void handlePageFault(systemState_t* system, unsigned int pageNumber) {
+void handlePageFault(systemState_t* system, unsigned int pageNumber, int taskLevel) {
     // Check if there are any free frames remaining
     if (system->nextFreeFrame == NUM_FRAMES) {
         // There are no free frames, need to evict with FIFO
@@ -180,7 +180,7 @@ void handlePageFault(systemState_t* system, unsigned int pageNumber) {
         system->oldestFrame = (system->oldestFrame + 1) % NUM_FRAMES;
 
         // Check if a TLB is in use and if evicted page is present for flushing
-        if (system->tlb[0].lastUsed > 0) {
+        if (taskLevel == 4) {
             flushTLBEntry(system->tlb, evictedPage);
         }
 
@@ -242,7 +242,7 @@ void processAddress(FILE* file, systemState_t* system, int taskLevel) {
             unsigned int pageFault = !system->pageTable[pageNumber].present;
 
             if (pageFault) {
-                handlePageFault(system, pageNumber);
+                handlePageFault(system, pageNumber, taskLevel);
             }
 
             // Update TLB for task 4
@@ -358,6 +358,13 @@ int searchTLB(tlbEntry_t* tlb, unsigned int pageNumber) {
 void updateTLB(tlbEntry_t* tlb, unsigned int pageNumber, unsigned int frameNumber, unsigned int accessCount) {
     int emptyIndex = -1;
     int lruIndex = 0;
+    int tlbIndex = searchTLB(tlb, pageNumber);
+    unsigned int tlbHit = (tlbIndex != -1);
+
+    // Don't update TLB if tlbhit
+    if (tlbHit) {
+        return;
+    }
 
     // look for an empty entry or determine the LRU entry
     for (int i = 0; i < TLB_SIZE; ++i) {
