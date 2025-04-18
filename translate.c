@@ -229,6 +229,7 @@ void processAddress(FILE* file, systemState_t* system, int taskLevel) {
 
                 printf("tlb-hit=%u,page-number=%u,frame=%u,physical-address=%u\n", 
                     tlbHit, pageNumber, frameNumber, physicalAddress);
+                continue;
 
             } else {
                 // TLB miss
@@ -358,13 +359,6 @@ int searchTLB(tlbEntry_t* tlb, unsigned int pageNumber) {
 void updateTLB(tlbEntry_t* tlb, unsigned int pageNumber, unsigned int frameNumber, unsigned int accessCount) {
     int emptyIndex = -1;
     int lruIndex = 0;
-    int tlbIndex = searchTLB(tlb, pageNumber);
-    unsigned int tlbHit = (tlbIndex != -1);
-
-    // Don't update TLB if tlbhit
-    if (tlbHit) {
-        return;
-    }
 
     // look for an empty entry or determine the LRU entry
     for (int i = 0; i < TLB_SIZE; ++i) {
