@@ -111,12 +111,14 @@ int main(int argc, char *argv[]) {
  */
 void runSimulation(char* filename, char* task) {
     FILE* file = openInputFile(filename);
+    int taskLevel = task[4] - '0';
     systemState_t system;
+
     initializeSystem(&system);
-
-    processAddress(file, &system, task[4] - '0');
-
+    processAddress(file, &system, taskLevel);
     fclose(file);
+
+    return;
 }
 
 /**
@@ -127,7 +129,6 @@ void runSimulation(char* filename, char* task) {
  */
 FILE* openInputFile(char* filename) {
     FILE* file = fopen(filename, "r");
-
     if (!file) {
         fprintf(stderr, "Error opening file: %s\n", filename);
         exit(EXIT_FAILURE);
@@ -148,6 +149,7 @@ void initializeSystem(systemState_t* system) {
     memset(system->frameTable, 0, sizeof(system->frameTable));
     memset(system->tlb, 0, sizeof(system->tlb));
 
+    // Initialize counters
     system->accessCount = 0;
     system->nextFreeFrame = 0;
     system->oldestFrame = 0;
@@ -196,6 +198,8 @@ void handlePageFault(systemState_t* system, unsigned int pageNumber, int taskLev
             ++system->nextFreeFrame;
         }
     }
+
+    return;
 }
 
 
@@ -258,6 +262,8 @@ void processAddress(FILE* file, systemState_t* system, int taskLevel) {
                 pageNumber, pageFault, system->pageTable[pageNumber].frameNumber, physicalAddress);
         }
     }
+
+    return;
 }
 
 
@@ -269,7 +275,7 @@ void processAddress(FILE* file, systemState_t* system, int taskLevel) {
  * @param offset Pointer to store the extracted offset
  */
 void parseLogicalAddress(unsigned int logicalAddress, unsigned int* pageNumber, unsigned int* offset) {
-    // onsider only the rightmost 22 bits using bitwise & operator with LOGICAL_ADDRESS_MASK 
+    // Consider only the rightmost 22 bits using bitwise & operator with LOGICAL_ADDRESS_MASK 
     unsigned int maskedAddress = logicalAddress & LOGICAL_ADDRESS_MASK; 
 
     // Extract the page number (bits 12 to 22 of the maskedAddress) 
@@ -301,7 +307,6 @@ unsigned int calculatePhysicalAddress(unsigned int frameNumber, unsigned int off
  */
 void flushTLBEntry(tlbEntry_t* tlb, unsigned int pageNumber) {
     int index = searchTLB(tlb, pageNumber);
-
     if (index != -1) {
         tlb[index].present = 0;
         printf("tlb-flush=%u,tlb-size=%u\n", pageNumber, countTLBEntries(tlb));
@@ -320,7 +325,6 @@ void flushTLBEntry(tlbEntry_t* tlb, unsigned int pageNumber) {
   */
 unsigned int countTLBEntries(tlbEntry_t* tlb) {
     int count = 0;
-
     for (int i = 0; i < TLB_SIZE; ++i) {
         count += tlb[i].present;
     }
