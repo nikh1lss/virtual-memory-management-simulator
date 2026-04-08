@@ -1,12 +1,18 @@
 CC = gcc
 CFLAGS = -Wall
 
+SRCS = main.c address.c tlb.c simulation.c
+OBJS = $(SRCS:.c=.o)
+
 all: translate
 
-translate: translate.c
-	$(CC) $(CFLAGS) -o translate translate.c
+translate: $(OBJS)
+	$(CC) $(CFLAGS) -o translate $(OBJS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f translate *.o
+	rm -f translate $(OBJS)
 
 .PHONY: all clean

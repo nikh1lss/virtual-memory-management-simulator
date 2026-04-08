@@ -63,9 +63,7 @@ void updateTLB(tlbEntry_t *tlb, unsigned int pageNumber,
                unsigned int frameNumber, unsigned int accessCount);
 void flushTLBEntry(tlbEntry_t *tlb, unsigned int pageNumber);
 unsigned int countTLBEntries(tlbEntry_t *tlb);
-FILE *openInputFile(char *filename);
 void initializeSystem(systemState_t *system);
 void handlePageFault(systemState_t *system, unsigned int pageNumber,
                      int taskLevel);
 void processAddress(FILE *file, systemState_t *system, int taskLevel);
-void runSimulation(char *filename, char *task);
